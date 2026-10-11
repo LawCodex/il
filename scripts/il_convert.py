@@ -87,7 +87,7 @@ def render_tpl(name, pos, named, mode):
     if name == "ח:פנימי":
         return r(arg(pos, 1) or arg(pos, 0))
     if name == "ח:חיצוני":
-        target, text = arg(pos, 0).strip(), arg(pos, 1) or arg(pos, 0)
+        target, text = html.unescape(expand(arg(pos, 0), "md")).strip(), arg(pos, 1) or arg(pos, 0)
         if re.match(r"https?://", target):
             return link(r(text), target, mode)
         return r(text)
@@ -95,7 +95,7 @@ def render_tpl(name, pos, named, mode):
         t = r(arg(pos, 0)).strip()
         return ("<i>%s</i>" if mode == "html" else "*%s*") % t if t else ""
     if name == "ח:תיבה":
-        cite, url = r(arg(pos, 0)).strip(), arg(pos, 2).strip()
+        cite, url = r(arg(pos, 0)).strip(), html.unescape(expand(arg(pos, 2), "md")).strip()
         tip = clean_title(r(arg(pos, 1)))
         return link(cite, url, mode, tip) if url.startswith("http") else cite
     if name in ("ש",):
@@ -134,7 +134,9 @@ def render_tpl(name, pos, named, mode):
         return "%s (%s)" % (a, b) if b else a
     if "תוכן" in named and not pos:
         return r(named["תוכן"])
-    if name in ("לועזית", "לשמאל", "קוד", "אפור", "בלוק", "ממורעז", "ממוכז", "ממרכז"):
+    if name == "sfrac":
+        return "(%s)/(%s)" % (r(arg(pos, 0)).strip(), r(arg(pos, 1)).strip())
+    if name in ("ltr", "rtl", "מוגדל2", "משמאל לימין", "מימין לשמאל", "לועזית", "לשמאל", "קוד", "אפור", "בלוק", "ממורעז", "ממוכז", "ממרכז"):
         return r(arg(pos, 0))
     if name == "צבע גופן":
         return r(arg(pos, 1))
@@ -273,7 +275,7 @@ def clean_para(s):
 def amend(named, pos, idx):
     a = arg(pos, idx).strip()
     if a.startswith("תיקון"):
-        return a
+        return inline(a).replace("*", "").strip()
     return ""
 
 
@@ -469,6 +471,28 @@ def clean_title(t):
     return re.sub(r"\s+", " ", t).strip()
 
 
+GEM = {"א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8, "ט": 9, "י": 10, "כ": 20,
+       "ך": 20, "ל": 30, "מ": 40, "ם": 40, "נ": 50, "ן": 50, "ס": 60, "ע": 70, "פ": 80, "ף": 80,
+       "צ": 90, "ץ": 90, "ק": 100, "ר": 200, "ש": 300, "ת": 400}
+
+
+def pub_year(text):
+    """Year of first publication from the first citation box (e.g. 'ע״ר 1936, ...' or 'ס״ח תשי״ח, 69')."""
+    m = re.search(r"\{\{ח:תיבה\|([^|}]*)", text)
+    if not m:
+        return None
+    c = m.group(1)
+    y = re.search(r"(?<!\d)(1[89]\d\d|20\d\d)(?!\d)", c)
+    if y:
+        return int(y.group(1))
+    h = re.search(r"\bה?(ת[\u05d0-\u05ea\"״׳']*)", c)
+    if h:
+        v = sum(GEM.get(ch, 0) for ch in h.group(1))
+        if 700 <= v <= 800:
+            return v + 5000 - 3760
+    return None
+
+
 def title_year(t):
     m = re.findall(r"(?<!\d)(1[89]\d\d|20\d\d)(?!\d)", t)
     return int(m[-1]) if m else None
@@ -499,7 +523,7 @@ def translit(t):
 
 def classify(title):
     t = title.replace("־", "-")
-    first = t.split()[0] if t.split() else ""
+    first = re.split(r"[\s-]+", t.strip())[0] if t.strip() else ""
     if re.match(r"^חוק[- ]יסוד:", t):
         return "basic-law", "basic-laws"
     if first in ("חוק", "החוק"):
@@ -556,7 +580,7 @@ def main():
         typ, top = classify(title if classify(title)[0] != "other" else pagetitle)
         status, note = detect_status(text, title)
         date = greg_date(meta.get("sign_text"))
-        year = title_year(title) or (int(date[:4]) if date else None) or title_year(pagetitle)
+        year = title_year(title) or (int(date[:4]) if date else None) or title_year(pagetitle) or pub_year(text)
         kid = meta["knesset_id"]
         ident = kid or "ws%d" % pg["pageid"]
         slug = translit(pagetitle)[:80].strip("-") or "law"
